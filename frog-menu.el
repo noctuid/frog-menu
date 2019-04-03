@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.1
+;; Version: 0.2.2
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -501,7 +501,7 @@ buffer positions containing the candidates and default to
          (let* ((key (kbd (key-description (vector char))))
                 (cmd (lookup-key frog-menu--avy-action-map key)))
            (if (commandp cmd)
-               (throw 'done (list (list cmd)))
+               (throw 'done (list cmd))
              (message "No such candidate: %s, hit `C-g' to quit."
                       (if (characterp char) (string char) char))
              (throw 'done 'restart))))))
@@ -559,9 +559,10 @@ ACTIONS is the argument of `frog-menu-read'."
                (avy-all-windows nil)
                (avy-style 'pre)
                (avy-action #'identity)
-               (pos (avy--process
-                     candidates
-                      #'frog-menu--avy-style)))
+               (pos (with-selected-window window
+                      (avy--process
+                       candidates
+                       #'frog-menu--avy-style))))
           (cond ((number-or-marker-p pos)
                  ;; string
                  (with-current-buffer buffer
