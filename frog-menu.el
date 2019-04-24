@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.2
+;; Version: 0.2.3
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -293,15 +293,19 @@ Fills the buffer with a grid of FORMATTED-STRINGS followed by PROMPT and
 ACTIONS."
   (when formatted-strings
     (insert formatted-strings)
-    (insert "\n\n"))
-  (add-text-properties
-   (point)
-   (progn
-     (insert prompt)
-     (point))
-   '(face frog-menu-prompt-face))
-  (insert "\n")
+    (insert "\n"))
+  (unless (string-empty-p prompt)
+	(insert "\n")
+	(add-text-properties
+	 (point)
+	 (progn
+       (insert prompt)
+       (point))
+	 '(face frog-menu-prompt-face))
+	(insert "\n"))
   (when formatted-actions
+	(when (string-empty-p prompt)
+	  (insert "\n"))
     (insert formatted-actions))
   (when formatted-strings
       ;; padding for avy char
@@ -313,6 +317,10 @@ ACTIONS."
                       (make-string frog-menu-min-col-padding ?\s)
                       (if frog-menu-avy-padding " " "")))
       (forward-line 1)))
+  ;; insert invisible char otherwise posframe
+  ;; hides second line when only two strings and
+  ;; no prompt, no actions
+  (insert " ")
   ;; posframe needs point at start,
   ;; otherwise it fails on first init
   (goto-char (point-min)))
@@ -579,6 +587,19 @@ ACTIONS is the argument of `frog-menu-read'."
 
 
 ;; * Entry point
+
+
+;;;###autoload
+(defun frog-menu-call (cmds &optional prompt)
+  "Read a command from CMDS and execute it.
+
+CMDS is a list of command symbols to choose from.  If PROMPT is
+given it should be a string with prompt information for the
+user."
+  (let ((cmd (intern-soft (frog-menu-read (or prompt "")
+										  (mapcar #'symbol-name cmds)))))
+	(command-execute cmd)))
+
 
 ;;;###autoload
 (defun frog-menu-read (prompt strings &optional actions)
