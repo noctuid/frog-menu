@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.3
+;; Version: 0.2.4
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -182,9 +182,9 @@ exits through an error."
   :type 'integer)
 
 (defcustom frog-menu-grid-width-function
-  (lambda () (cond ((eq frog-menu-type 'avy-posframe)
+  (lambda () (cond ((eq (frog-menu-type) 'avy-posframe)
                     (/ (frame-width) 2))
-                   ((eq frog-menu-type 'avy-side-window)
+                   ((eq (frog-menu-type) 'avy-side-window)
                     (* 2 (/ (frame-width) 3)))
                    (t (frame-width))))
   "Returns the width that should be used for menu grid.
@@ -292,35 +292,20 @@ PROMPT, FORMATTED-STRINGS and FORMATTED-ACTIONS are the args from
 Fills the buffer with a grid of FORMATTED-STRINGS followed by PROMPT and
 ACTIONS."
   (when formatted-strings
-    (insert formatted-strings)
-    (insert "\n"))
+    (insert formatted-strings))
   (unless (string-empty-p prompt)
-	(insert "\n")
-	(add-text-properties
-	 (point)
-	 (progn
+    (insert "\n\n")
+    (add-text-properties
+     (point)
+     (progn
        (insert prompt)
        (point))
-	 '(face frog-menu-prompt-face))
-	(insert "\n"))
+     '(face frog-menu-prompt-face))
+    (insert "\n"))
   (when formatted-actions
-	(when (string-empty-p prompt)
-	  (insert "\n"))
+    (when (string-empty-p prompt)
+        (insert "\n\n"))
     (insert formatted-actions))
-  (when formatted-strings
-      ;; padding for avy char
-    (goto-char (point-min))
-    (while (not (eobp))
-      (goto-char (line-end-position))
-      ;; Fix: assumes only one avy char...
-      (insert (concat " "
-                      (make-string frog-menu-min-col-padding ?\s)
-                      (if frog-menu-avy-padding " " "")))
-      (forward-line 1)))
-  ;; insert invisible char otherwise posframe
-  ;; hides second line when only two strings and
-  ;; no prompt, no actions
-  (insert " ")
   ;; posframe needs point at start,
   ;; otherwise it fails on first init
   (goto-char (point-min)))
@@ -331,7 +316,14 @@ ACTIONS."
 (defun frog-menu-grid-format (strings)
   "Format STRINGS to a grid."
     (frog-menu--grid-format
-     strings
+     (mapcar (lambda (str)
+               (concat (propertize
+                        "_"
+                        'face (list :foreground
+                                (face-background
+                                 'frog-menu-posframe-background-face nil t)))
+                       (if frog-menu-avy-padding " " "")
+                       str)) strings)
      (funcall frog-menu-grid-column-function)
      (funcall frog-menu-grid-width-function)))
 
@@ -524,29 +516,6 @@ action result. ACTIONS is the argument of `frog-menu-read'."
     (define-key frog-menu--avy-action-map (kbd (car action))
       (lambda () (interactive) (car (cddr action))))))
 
-(defun frog-menu--avy-style (path leaf)
-  "Create an overlay with PATH at LEAF.
-PATH is a list of keys from tree root to LEAF.
-LEAF is normally ((BEG . END) . WND)."
-  (let* ((path (mapcar #'avy--key-to-char path))
-         (str (propertize (apply #'string (reverse path))
-                          'face 'avy-lead-face)))
-    (when (or avy-highlight-first (> (length str) 1))
-      (set-text-properties 0 1 '(face avy-lead-face-0) str))
-    (setq str (concat
-               (propertize avy-current-path
-                           'face 'avy-lead-face-1)
-               str))
-    (avy--overlay
-     str
-     (avy-candidate-beg leaf) nil
-     (avy-candidate-wnd leaf)
-     (lambda (str old-str)
-       (concat str
-               (if frog-menu-avy-padding " " "")
-               old-str)))))
-
-
 (defun frog-menu-query-with-avy (buffer window actions)
   "Query handler for avy-posframe.
 
@@ -565,19 +534,21 @@ ACTIONS is the argument of `frog-menu-read'."
                (avy-handler-function #'frog-menu--posframe-ace-handler)
                (avy-pre-action #'ignore)
                (avy-all-windows nil)
-               (avy-style 'pre)
+               (avy-style 'at-full)
                (avy-action #'identity)
                (pos (with-selected-window window
                       (avy--process
                        candidates
-                       #'frog-menu--avy-style))))
+                       (avy--style-fn avy-style)))))
           (cond ((number-or-marker-p pos)
                  ;; string
                  (with-current-buffer buffer
                    (let* ((start pos)
                           (end (or (next-single-property-change start 'face)
                                    (point-max))))
-                     (buffer-substring start end))))
+                     ;; get rid of the padding
+                     (replace-regexp-in-string
+                      "\\`_ *" "" (buffer-substring start end)))))
                 ((commandp pos)
                  ;; action
                  (call-interactively pos))))
@@ -597,8 +568,8 @@ CMDS is a list of command symbols to choose from.  If PROMPT is
 given it should be a string with prompt information for the
 user."
   (let ((cmd (intern-soft (frog-menu-read (or prompt "")
-										  (mapcar #'symbol-name cmds)))))
-	(command-execute cmd)))
+                                          (mapcar #'symbol-name cmds)))))
+    (command-execute cmd)))
 
 
 ;;;###autoload
