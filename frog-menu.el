@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.4
+;; Version: 0.2.5
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -182,9 +182,9 @@ exits through an error."
   :type 'integer)
 
 (defcustom frog-menu-grid-width-function
-  (lambda () (cond ((eq (frog-menu-type) 'avy-posframe)
+  (lambda () (cond ((eq (funcall frog-menu-type-function) 'avy-posframe)
                     (/ (frame-width) 2))
-                   ((eq (frog-menu-type) 'avy-side-window)
+                   ((eq (funcall frog-menu-type-function) 'avy-side-window)
                     (* 2 (/ (frame-width) 3)))
                    (t (frame-width))))
   "Returns the width that should be used for menu grid.
@@ -294,7 +294,8 @@ ACTIONS."
   (when formatted-strings
     (insert formatted-strings))
   (unless (string-empty-p prompt)
-    (insert "\n\n")
+    (when formatted-strings
+      (insert "\n\n"))
     (add-text-properties
      (point)
      (progn
@@ -303,8 +304,9 @@ ACTIONS."
      '(face frog-menu-prompt-face))
     (insert "\n"))
   (when formatted-actions
-    (when (string-empty-p prompt)
-        (insert "\n\n"))
+    (when (and formatted-strings
+               (string-empty-p prompt))
+      (insert "\n\n"))
     (insert formatted-actions))
   ;; posframe needs point at start,
   ;; otherwise it fails on first init
@@ -499,9 +501,9 @@ buffer positions containing the candidates and default to
          (signal 'user-error (list "Mouse event not handled" char)))
         (t
          (let* ((key (kbd (key-description (vector char))))
-                (cmd (lookup-key frog-menu--avy-action-map key)))
-           (if (commandp cmd)
-               (throw 'done (list cmd))
+                (f (lookup-key frog-menu--avy-action-map key)))
+           (if (functionp f)
+               (throw 'done (list f))
              (message "No such candidate: %s, hit `C-g' to quit."
                       (if (characterp char) (string char) char))
              (throw 'done 'restart))))))
@@ -514,7 +516,7 @@ action result. ACTIONS is the argument of `frog-menu-read'."
   (setq frog-menu--avy-action-map (make-sparse-keymap))
   (dolist (action actions)
     (define-key frog-menu--avy-action-map (kbd (car action))
-      (lambda () (interactive) (car (cddr action))))))
+      (lambda () (car (cddr action))))))
 
 (defun frog-menu-query-with-avy (buffer window actions)
   "Query handler for avy-posframe.
@@ -549,12 +551,12 @@ ACTIONS is the argument of `frog-menu-read'."
                      ;; get rid of the padding
                      (replace-regexp-in-string
                       "\\`_ *" "" (buffer-substring start end)))))
-                ((commandp pos)
+                ((functionp pos)
                  ;; action
-                 (call-interactively pos))))
-      (let ((cmd (lookup-key frog-menu--avy-action-map (vector (read-char)))))
-        (when (commandp cmd)
-          (call-interactively cmd))))))
+                 (funcall pos))))
+      (let ((f (lookup-key frog-menu--avy-action-map (vector (read-char)))))
+        (when (functionp f)
+          (funcall f))))))
 
 
 ;; * Entry point
