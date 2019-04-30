@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.5
+;; Version: 0.2.7
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -358,6 +358,7 @@ ACTIONS."
             (replace-match " "))))
       (buffer-string))))
 
+;; Taken partly from `completion--insert-strings'
 (defun frog-menu--grid-format (strings cols &optional width)
   "Return grid string built with STRINGS.
 
@@ -365,7 +366,7 @@ The grid will be segmented into columns. COLS is the maximum
 number of columns to use. The columns have WIDTH space in
 horizontal direction which default to frame width.
 
-Returns the buffer containing the formatted grid."
+Returns the formatted grid string."
   (with-temp-buffer
     (let* ((length (apply #'max
                           (mapcar #'string-width strings)))
@@ -374,27 +375,53 @@ Returns the buffer containing the formatted grid."
            (colwidth (/ wwidth columns))
            (column 0)
            (first t)
-           laststring)
+           (rows (/ (length strings) columns))
+           (row 0))
       (dolist (str strings)
-        (unless (equal laststring str)
-          (setq laststring str)
-          (let ((length (string-width str)))
-            (unless first
-              (if (or (< wwidth (+ (max colwidth length) column))
-                      (zerop length))
-                  (progn
-                    (insert "\n" (if (zerop length) "\n" ""))
-                    (setq column 0))
-                (insert " \t")
-                (set-text-properties (1- (point)) (point)
-                                     `(display (space :align-to ,column)))))
-            (setq first (zerop length))
-            (add-text-properties (point)
-                                 (progn (insert str)
-                                        (point))
-                                 '(face frog-menu-candidates-face))
-            (setq column (+ column
-                            (* colwidth (ceiling length colwidth)))))))
+        (let ((length (string-width str)))
+          (cond ((eq frog-menu-format 'vertical)
+                 ;; Vertical format
+                 (when (> row rows)
+                   (forward-line (- -1 rows))
+                   (setq row 0 column (+ column colwidth)))
+                 (when (> column 0)
+                   (end-of-line)
+                   (while (> (current-column) column)
+                     (if (eobp)
+                         (insert "\n")
+                       (forward-line 1)
+                       (end-of-line)))
+                   (insert " \t")
+                   (set-text-properties (1- (point)) (point)
+                                        `(display (space :align-to ,column))))
+
+                 (add-text-properties (point)
+                                      (progn (insert str)
+                                             (point))
+                                      '(face frog-menu-candidates-face))
+
+                 (if (> column 0)
+                     (forward-line)
+                   (insert "\n"))
+                 (setq row (1+ row)))
+                (t
+                 ;; horizontal
+                 (unless first
+                   (if (or (< wwidth (+ (max colwidth length) column))
+                           (zerop length))
+                       (progn
+                         (insert "\n" (if (zerop length) "\n" ""))
+                         (setq column 0))
+                     (insert " \t")
+                     (set-text-properties (1- (point)) (point)
+                                          `(display (space :align-to ,column)))))
+                 (setq first (zerop length))
+                 (add-text-properties (point)
+                                      (progn (insert str)
+                                             (point))
+                                      '(face frog-menu-candidates-face))
+                 (setq column (+ column
+                                 (* colwidth (ceiling length colwidth))))))))
       (buffer-string))))
 
 
@@ -504,8 +531,7 @@ buffer positions containing the candidates and default to
                 (f (lookup-key frog-menu--avy-action-map key)))
            (if (functionp f)
                (throw 'done (list f))
-             (message "No such candidate: %s, hit `C-g' to quit."
-                      (if (characterp char) (string char) char))
+             (message "No such candidate, hit `C-g' to quit.")
              (throw 'done 'restart))))))
 
 (defun frog-menu--init-avy-action-map (actions)
@@ -516,7 +542,9 @@ action result. ACTIONS is the argument of `frog-menu-read'."
   (setq frog-menu--avy-action-map (make-sparse-keymap))
   (dolist (action actions)
     (define-key frog-menu--avy-action-map (kbd (car action))
-      (lambda () (car (cddr action))))))
+      (lambda () (car (cddr action)))))
+  ;; space must not be used by actions
+  (define-key frog-menu--avy-action-map "\t" 'frog-menu--complete))
 
 (defun frog-menu-query-with-avy (buffer window actions)
   "Query handler for avy-posframe.
@@ -551,15 +579,33 @@ ACTIONS is the argument of `frog-menu-read'."
                      ;; get rid of the padding
                      (replace-regexp-in-string
                       "\\`_ *" "" (buffer-substring start end)))))
+                ((eq pos 'frog-menu--complete)
+                 ;; switch to completion from `frog-menu-read'
+                 pos)
                 ((functionp pos)
                  ;; action
                  (funcall pos))))
-      (let ((f (lookup-key frog-menu--avy-action-map (vector (read-char)))))
-        (when (functionp f)
-          (funcall f))))))
+      (let ((f nil))
+        (while (not f)
+          (unless (setq f (lookup-key frog-menu--avy-action-map
+                                      (vector (read-char))))
+            (message "No such action, hit C-g to quit.")))
+        (funcall f)))))
 
 
 ;; * Entry point
+
+(defun frog-menu--complete (prompt collection &rest args)
+  "PROMPT for `completing-read' COLLECTION.
+
+Remaining ARGS are passed to `completing-read'. PROMPT and
+COLLECTION are the arguments from `frog-menu-read'."
+  (apply #'completing-read
+         ;; make sure prompt is "completing readable"
+         (if (string-empty-p prompt)
+             ": "
+           (replace-regexp-in-string "\\(: ?\\)?\\'" ": " prompt))
+         collection args))
 
 
 ;;;###autoload
@@ -573,18 +619,38 @@ user."
                                           (mapcar #'symbol-name cmds)))))
     (command-execute cmd)))
 
+(defvar frog-menu-sort-function nil
+  "A function to sort displayed strings for `frog-menu-read'.
+
+If this variable is bound to a function `frog-menu-read' will
+pass the strings to be displayed and the function to `sort':
+
+    (let ((frog-menu-sort-function #'string<))
+      (frog-menu-read \"Example\" '(\"z\" \"a\")))")
+
+(defvar frog-menu-format completions-format
+  "Defines in which order strings for `frog-menu-read' are displayed.
+
+If the value is `vertical', strings are ordered vertically. If
+the value is `horizontal', strings are ordered horizontally. This
+variable does not define sorting, see `frog-menu-sort-function'
+for this.")
+
 
 ;;;###autoload
-(defun frog-menu-read (prompt strings &optional actions)
+(defun frog-menu-read (prompt collection &optional actions)
   "Read from a menu of variable `frog-menu-type'.
 
 PROMPT is a string with prompt information for the user.
 
-STRINGS is a list of strings from which the user is expected to
-choose one.
+COLLECTION is a list from which the user can choose an item. It
+can be a list of strings or an alist mapping strings to return
+values. Users can switch to `completing-read' from COLLECTION
+using the TAB key. For sorting the displayed strings see
+`frog-menu-sort-function'.
 
 ACTIONS is an additional list of actions that can be given to let
-the user choose an action instead of returning a chosen string.
+the user choose an action instead an item from COLLECTION.
 
 Each ACTION is a list of the form:
 
@@ -598,8 +664,18 @@ describe the action.
 
 RETURN will be the returned value if KEY is pressed."
   (let* ((frog-menu-type (funcall frog-menu-type-function))
+         (convf (and collection (consp (car collection))
+                     #'car))
+         (strings (if convf
+                      (mapcar convf collection)
+                    collection))
+         (strings (if frog-menu-sort-function
+                      (sort strings frog-menu-sort-function)
+                    strings))
          (buf (frog-menu--init-buffer (get-buffer-create frog-menu--buffer)
-                                      prompt strings actions))
+                                      prompt
+                                      strings
+                                      actions))
          (dhandler (cdr (assq frog-menu-type
                               frog-menu-display-handler-alist)))
          (doption (cdr (assq frog-menu-type
@@ -614,9 +690,17 @@ RETURN will be the returned value if KEY is pressed."
         (setq res (funcall qhandler buf window actions))
       (when cuhandler
         (funcall cuhandler buf window)))
-    res))
+    (when (eq res 'frog-menu--complete)
+      (setq res (frog-menu--complete prompt strings)))
+    (cond ((eq convf #'car)
+           (cdr (assoc res collection)))
+          (t res))))
 
 
 
 (provide 'frog-menu)
 ;;; frog-menu.el ends here
+
+
+
+
