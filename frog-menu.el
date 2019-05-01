@@ -4,7 +4,7 @@
 
 ;; Author: Clemens Radermacher <clemera@posteo.net>
 ;; URL: https://github.com/clemera/frog-menu
-;; Version: 0.2.7
+;; Version: 0.2.8
 ;; Package-Requires: ((emacs "26") (avy "0.4") (posframe "0.4"))
 ;; Keywords: convenience
 
@@ -322,8 +322,10 @@ ACTIONS."
                (concat (propertize
                         "_"
                         'face (list :foreground
-                                (face-background
-                                 'frog-menu-posframe-background-face nil t)))
+                                (if (eq (funcall frog-menu-type-function) 'avy-posframe)
+                                    (face-background
+                                     'frog-menu-posframe-background-face nil t)
+                                  (face-background 'default))))
                        (if frog-menu-avy-padding " " "")
                        str)) strings)
      (funcall frog-menu-grid-column-function)
@@ -606,6 +608,14 @@ COLLECTION are the arguments from `frog-menu-read'."
              ": "
            (replace-regexp-in-string "\\(: ?\\)?\\'" ": " prompt))
          collection args))
+
+(defun frog-menu-completing-read-function (prompt collection &rest _)
+  "Can be used as `completing-read-function'
+
+For now all arguments other than PROMPT and COLLECTION are
+ignored. COLLECTION has to use a format `frog-menu-read' can
+understand."
+  (frog-menu-read prompt collection))
 
 
 ;;;###autoload
